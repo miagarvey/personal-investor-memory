@@ -1,0 +1,81 @@
+﻿Explicit thesis / belief extraction:
+* Overview
+   * Goal: augment an investor’s judgment by making past context (conversations, considerations, patterns) available at the moment it is most useful
+   * System learns from historical interactions and artifacts to surface what has tended to matter
+   * Avoid losing institutional memory as volume and time
+   * Treats investment activity as ground truth, and from this infers recurring considerations and patterns
+   * All insights are grounded in source evidence and presented non-prescriptively
+* Architecture
+   * Interaction (call/email/thread) and Artifacts (documents) are ground truth
+   * Extract ‘Claim’ objects at a low level (e.g. we avoid TAMs under X)
+      * Claims have polarity, scope, confidence, source
+   * ‘Thesis’ is top claims / tensions for a given context
+   * Output would be visualizations of how beliefs have strengthened, changed
+* Use cases
+   * Contextual recall during deal review
+   * Consistent application of judgment
+   * Surfacing comparable situations
+   * Tracking beliefs and their changes over time
+   * Tracking where perspectives come from within a network
+   * Support clearer internal discussions
+   * Narrative coherence / opportunity for reflection over time
+* Platform
+   * Work off the dashboard you vibe coded – dashboard format seems most applicable
+   * Company context panel
+      * When partner opens doc, deal note, profile, email
+      * Relevant context from prior discussions, related situations
+   * Pattern lens
+      * Time aware display of beliefs
+   * Relationship context panel
+      * When viewing a person (founder / operator / investor)
+      * Topics this person appears in discussions about, where their inputs have added new considerations
+
+
+Plan:
+* Phase 1: Memory Core 
+   * Ingestion pipeline (emails / meetings as text chunks), metadata
+      * Onboarding flow where Madison tells me what her current investment thesis
+   * Entity extraction and linking
+      * Normalize people (linkedin URLs) and companies (URL or linkedin URL)
+   * Simple search (find past discussions related to X)
+   * Goal: here are all past conversations and docs related to this company / pattern
+* Phase 2: Context Viewer v1
+   * Web app / component of dashboard
+   * Input methods: text, upload doc, search company / person
+   * Output: panel showing related past interactions, similar companies, raw excerpts
+   * Goal: validate use cases for memory core
+* Phase 3: Claim extraction
+   * Extract low-level claims from chunks of data
+   * Each claim has polarity, scope (founder, GTM, moat), source references
+   * Stores claims internally
+   * Goal: context much sharper / selective, goal is to make the system opinionated and aligned with the investor
+   * Ladybug DB
+   * Application: madison could input a company, and then output evaluates against investment thesis / is it relevant 
+* Phase 4: Pattern aggregation & time awareness (third party evaluations) 
+   * Aggregate claims by context, time window
+   * Track changes
+   * UI pattern lens view in the dashboard 
+* Optional Phase 4.5: Relationship context
+   * Attribute claims / ideas to people within an investor’s memory
+   * Aggregate what topics are often discussed with people in their network, where they introduce novelty
+* Phase 5: Evaluation
+   * Partner pilots, collect feedback
+   * Iterate and present
+* 1/27
+* Phase 1:
+   * What data goes in (this will be a key point that we’ll hammer out on Thursday) 
+      * What their favorite newsletters are (media aspect), favorite people to follow on twitter 
+      * Meeting notes
+      * Emails sent and received 
+      * External data **
+         * Worried about exploding search and confusing signal about the partner’s thesis
+         * E.g. enrichment of companies thru company website search would be super valuable 
+      * *How can i get access to these
+   * Entity extraction
+      * Company
+      * Person
+      * Theme
+   * Ingestion: pull raw text, attach metadata (time stamp, participants, source type), chunk text
+   * Entity extraction and lining
+   * Retrieval paths: entity-based and semantic
+   * Vector + relational for now (just answer relatively straightforward questions), but on v2 of this would implement graph storage to better handle complex queries and display navigation across entities
