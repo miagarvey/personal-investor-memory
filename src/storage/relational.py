@@ -300,6 +300,14 @@ class RelationalStore(StorageBackend):
             )
             return [self._company_from_row(r) for r in result.scalars().all()]
 
+    async def list_companies(self, limit: int = 50) -> list[Company]:
+        """List all companies, ordered by name."""
+        async with self._session() as session:
+            result = await session.execute(
+                select(CompanyRow).order_by(CompanyRow.name).limit(limit)
+            )
+            return [self._company_from_row(r) for r in result.scalars().all()]
+
     # === People ===
 
     async def save_person(self, person: Person) -> None:
@@ -344,6 +352,14 @@ class RelationalStore(StorageBackend):
                 select(PersonRow)
                 .where(PersonRow.name.ilike(f"%{name}%"))
                 .limit(limit)
+            )
+            return [self._person_from_row(r) for r in result.scalars().all()]
+
+    async def list_people(self, limit: int = 50) -> list[Person]:
+        """List all people, ordered by name."""
+        async with self._session() as session:
+            result = await session.execute(
+                select(PersonRow).order_by(PersonRow.name).limit(limit)
             )
             return [self._person_from_row(r) for r in result.scalars().all()]
 

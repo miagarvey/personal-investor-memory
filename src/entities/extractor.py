@@ -31,6 +31,30 @@ LINKEDIN_PERSON_PATTERN = re.compile(
     r'linkedin\.com/in/([a-zA-Z0-9-]+)'
 )
 
+# Terms that spaCy frequently misclassifies as ORG in VC/finance text
+NON_COMPANY_TERMS = {
+    # Roles and titles
+    "cto", "ceo", "cfo", "coo", "cro", "cmo", "vp", "svp", "evp",
+    # Financial metrics and acronyms
+    "arr", "mrr", "tam", "sam", "som", "nps", "yoy", "mom", "qoq",
+    "roi", "irr", "moic", "tvpi", "dpi", "gp", "lp",
+    # Generic business/tech terms
+    "saas", "b2b", "b2c", "ai", "ml", "api",
+    "q1", "q2", "q3", "q4",
+    "series a", "series b", "series c", "series d",
+    "fortune 500",
+}
+
+# Patterns to strip from the end of spaCy ORG extractions.
+# These catch cases like "Fivetran - Follow-up thoughts" or "Fivetran Series A".
+TRAILING_NOISE_PATTERN = re.compile(
+    r'\s+[-–|]\s+.+$'                                       # "Fivetran - data infrastructure"
+    r'|\s+Series\s+[A-Z]\d?\b.*$'                           # "Fivetran Series A"
+    r'|\s+Q[1-4]\b.*$'                                      # "Fivetran Q4 Portfolio Update"
+    r'|\s+(?:Investment\s+Memo|Follow[\s-]*up|Portfolio\s+Update|Deal\s+Memo)\b.*$',
+    re.IGNORECASE,
+)
+
 
 class EntityExtractor:
     """
@@ -49,6 +73,24 @@ class EntityExtractor:
         entities.extend(self.extract_people(text))
         return entities
 
+    @staticmethod
+    def _clean_company_name(raw_name: str) -> str | None:
+        """Clean a spaCy ORG name, returning None if it should be rejected."""
+        name = raw_name.strip()
+
+        # Reject known non-company terms
+        if name.lower() in NON_COMPANY_TERMS:
+            return None
+
+        # Strip trailing noise (e.g. "Fivetran - Follow-up thoughts" → "Fivetran")
+        name = TRAILING_NOISE_PATTERN.sub("", name).strip()
+
+        # Reject if too short or is a non-company term after cleaning
+        if len(name) <= 1 or name.lower() in NON_COMPANY_TERMS:
+            return None
+
+        return name
+
     def extract_companies(self, text: str) -> list[ExtractedEntity]:
         """Extract company mentions using spaCy ORG + URL/LinkedIn regex."""
         entities = []
@@ -58,7 +100,9 @@ class EntityExtractor:
         doc = self.nlp(text)
         for ent in doc.ents:
             if ent.label_ == "ORG":
-                name = ent.text.strip()
+                name = self._clean_company_name(ent.text)
+                if name is None:
+                    continue
                 name_lower = name.lower()
                 if name_lower not in seen_names and len(name) > 1:
                     seen_names.add(name_lower)

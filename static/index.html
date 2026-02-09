@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Investor Memory - Context Viewer</title>
+    <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+    <header>
+        <h1>Investor Memory</h1>
+        <p class="subtitle">Context Viewer</p>
+    </header>
+
+    <main class="container">
+        <!-- Search Panel -->
+        <section class="panel search-panel">
+            <h2>Search</h2>
+            <div class="search-container">
+                <input
+                    type="text"
+                    id="search-input"
+                    placeholder="Search companies or people..."
+                    autocomplete="off"
+                >
+                <div id="search-results" class="search-results hidden"></div>
+            </div>
+            <div id="entity-list" class="entity-list">
+                <div class="entity-section">
+                    <h3>Companies</h3>
+                    <div id="company-list" class="entity-items"></div>
+                </div>
+                <div class="entity-section">
+                    <h3>People</h3>
+                    <div id="person-list" class="entity-items"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Input Panel -->
+        <section class="panel input-panel">
+            <h2>Input</h2>
+            <textarea
+                id="input-text"
+                placeholder="Paste text here to analyze or save to memory..."
+                rows="12"
+            ></textarea>
+            <div class="file-upload">
+                <label for="file-input" class="file-label">
+                    <span>Upload File</span>
+                    <input type="file" id="file-input" accept=".txt,.md,.pdf">
+                </label>
+                <span id="file-name" class="file-name"></span>
+            </div>
+            <div class="button-group">
+                <button id="analyze-btn" class="btn btn-primary">Analyze</button>
+                <button id="save-btn" class="btn btn-secondary">Save to Memory</button>
+            </div>
+        </section>
+
+        <!-- Context Panel -->
+        <section class="panel context-panel">
+            <h2>Context</h2>
+
+            <div id="extracted-entities" class="context-section hidden">
+                <h3>Extracted Entities</h3>
+                <div id="entity-chips" class="entity-chips"></div>
+            </div>
+
+            <div id="related-content" class="context-section">
+                <h3>Related Content</h3>
+                <div id="content-cards" class="content-cards">
+                    <p class="placeholder-text">Select an entity or analyze text to see related content.</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <div id="loading-overlay" class="loading-overlay hidden">
+        <div class="spinner"></div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

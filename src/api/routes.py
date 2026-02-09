@@ -1,7 +1,7 @@
 """
-FastAPI routes for Phase 1 Memory Core.
+FastAPI routes for Investor Memory.
 
-Endpoints:
+Phase 1 endpoints:
 - POST /ingest/email - Ingest an email
 - POST /ingest/meeting - Ingest meeting notes
 - POST /ingest/document - Ingest a document
@@ -10,14 +10,23 @@ Endpoints:
 - GET /company/{id}/context - Get all context for a company
 - GET /person/{id}/context - Get all context for a person
 - POST /admin/seed - Seed database with synthetic data
+
+Phase 2 endpoints:
+- GET /companies - List/search companies
+- GET /people - List/search people
+- POST /analyze - Analyze text (extract entities, find related)
 """
 
 from contextlib import asynccontextmanager
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from src.storage.relational import RelationalStore
@@ -27,7 +36,7 @@ from src.entities.extractor import EntityExtractor
 from src.entities.linker import EntityLinker
 from src.ingestion.pipeline import IngestionPipeline
 from src.search.retriever import Retriever
-from src.models import SourceType
+from src.models import SourceType, EntityType
 
 
 # === Request/Response Models ===
@@ -87,6 +96,36 @@ class ContextResponse(BaseModel):
     results: list[SearchResultResponse]
 
 
+# Phase 2 models
+class CompanyResponse(BaseModel):
+    id: UUID
+    name: str
+    url: Optional[str] = None
+    description: Optional[str] = None
+
+
+class PersonResponse(BaseModel):
+    id: UUID
+    name: str
+    email: Optional[str] = None
+    company_name: Optional[str] = None
+
+
+class ExtractedEntityResponse(BaseModel):
+    type: str  # "company" or "person"
+    name: str
+    id: Optional[UUID] = None
+
+
+class AnalyzeRequest(BaseModel):
+    text: str
+
+
+class AnalyzeResponse(BaseModel):
+    extracted_entities: list[ExtractedEntityResponse]
+    related_content: list[SearchResultResponse]
+
+
 # === Dependency container ===
 
 class AppState:
@@ -135,11 +174,25 @@ def create_app() -> FastAPI:
         await state.storage.close()
 
     app = FastAPI(
-        title="Investor Memory - Phase 1",
-        description="Memory Core: Ingestion, Entity Extraction, Search",
-        version="0.1.0",
+        title="Investor Memory",
+        description="Memory Core: Ingestion, Entity Extraction, Search, Context Viewer",
+        version="0.2.0",
         lifespan=lifespan,
     )
+
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
+    # Mount static files
+    static_dir = Path(__file__).parent.parent.parent / "static"
+    if static_dir.exists():
+        app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
     def _search_result_to_response(sr) -> SearchResultResponse:
         return SearchResultResponse(
@@ -258,6 +311,113 @@ def create_app() -> FastAPI:
         generator = SyntheticDataGenerator()
         count = await generator.seed_database(state.pipeline)
         return {"status": "ok", "items_seeded": count}
+
+    # === Phase 2: Context Viewer UI endpoints ===
+
+    @app.get("/companies")
+    async def list_companies(q: str = "", limit: int = 10) -> list[CompanyResponse]:
+        """List/search companies."""
+        if q:
+            companies = await state.storage.search_companies_by_name(q, limit=limit)
+        else:
+            # Get all companies if no query
+            companies = await state.storage.list_companies(limit=limit)
+        return [
+            CompanyResponse(
+                id=c.id,
+                name=c.name,
+                url=c.url,
+                description=c.description,
+            )
+            for c in companies
+        ]
+
+    @app.get("/people")
+    async def list_people(q: str = "", limit: int = 10) -> list[PersonResponse]:
+        """List/search people."""
+        if q:
+            people = await state.storage.search_people_by_name(q, limit=limit)
+        else:
+            people = await state.storage.list_people(limit=limit)
+
+        responses = []
+        for p in people:
+            company_name = None
+            if p.company_id:
+                company = await state.storage.get_company(p.company_id)
+                if company:
+                    company_name = company.name
+            responses.append(PersonResponse(
+                id=p.id,
+                name=p.name,
+                email=p.email,
+                company_name=company_name,
+            ))
+        return responses
+
+    @app.post("/analyze")
+    async def analyze_text(request: AnalyzeRequest) -> AnalyzeResponse:
+        """Analyze text: extract entities and find related content without saving."""
+        # Extract entities
+        extractor = EntityExtractor()
+
+        raw_entities = extractor.extract(request.text)
+        extracted_entities = []
+
+        for e in raw_entities:
+            entity_type = "company" if e.entity_type == EntityType.COMPANY else "person"
+            meta = e.metadata or {}
+
+            # Try to find existing entity without creating new ones
+            entity_id = None
+            if entity_type == "company":
+                if meta.get("linkedin_url"):
+                    existing = await state.storage.get_company_by_linkedin(meta["linkedin_url"])
+                    if existing:
+                        entity_id = existing.id
+                if not entity_id and meta.get("url"):
+                    existing = await state.storage.get_company_by_url(meta["url"])
+                    if existing:
+                        entity_id = existing.id
+                if not entity_id:
+                    matches = await state.storage.search_companies_by_name(e.text, limit=1)
+                    if matches:
+                        entity_id = matches[0].id
+            else:  # person
+                if meta.get("linkedin_url"):
+                    existing = await state.storage.get_person_by_linkedin(meta["linkedin_url"])
+                    if existing:
+                        entity_id = existing.id
+                if not entity_id and meta.get("email"):
+                    existing = await state.storage.get_person_by_email(meta["email"])
+                    if existing:
+                        entity_id = existing.id
+                if not entity_id:
+                    matches = await state.storage.search_people_by_name(e.text, limit=1)
+                    if matches:
+                        entity_id = matches[0].id
+
+            extracted_entities.append(ExtractedEntityResponse(
+                type=entity_type,
+                name=e.text,
+                id=entity_id,
+            ))
+
+        # Find related content via semantic search on the input text
+        related = await state.retriever.semantic_search(
+            query=request.text[:500],  # Use first 500 chars as query
+            limit=10,
+        )
+
+        return AnalyzeResponse(
+            extracted_entities=extracted_entities,
+            related_content=[_search_result_to_response(r) for r in related],
+        )
+
+    @app.get("/")
+    async def root():
+        """Redirect to the UI."""
+        return FileResponse(static_dir / "index.html")
 
     @app.get("/health")
     async def health():
