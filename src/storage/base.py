@@ -113,3 +113,13 @@ class StorageBackend(ABC):
     @abstractmethod
     async def get_theme(self, id: UUID) -> Optional[Theme]:
         pass
+
+    @abstractmethod
+    async def get_theme_by_name(self, name: str) -> Optional[Theme]:
+        """Get a theme by its name."""
+        pass
+
+    @abstractmethod
+    async def get_chunks_by_entity(self, entity_id: UUID, limit: int = 50) -> list[Chunk]:
+        """Get all chunks linked to a specific entity."""
+        pass

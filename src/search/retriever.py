@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from typing import Optional
 from uuid import UUID
 
-from src.models import Chunk, Company, Person, Theme
+from src.models import Chunk, Company, Person
 from src.storage.base import StorageBackend
 from src.storage.vector import VectorStore, VectorSearchResult
 
@@ -14,7 +14,6 @@ class SearchResult:
     score: float
     company: Optional[Company] = None
     people: list[Person] | None = None
-    themes: list[Theme] | None = None
 
 
 class Retriever:
@@ -24,9 +23,6 @@ class Retriever:
     Supports two retrieval paths:
     1. Entity-based: Find all content related to a company/person
     2. Semantic: Find content similar to a query
-
-    Goal: "Here are all past conversations and docs related to
-    this company / pattern"
     """
 
     def __init__(
@@ -44,16 +40,18 @@ class Retriever:
         company_id: UUID,
         limit: int = 20,
     ) -> list[SearchResult]:
-        """
-        Find all content related to a company.
+        """Find all content related to a company."""
+        chunks = await self.storage.get_chunks_by_entity(company_id, limit=limit)
+        company = await self.storage.get_company(company_id)
 
-        Uses entity-based retrieval from relational store.
-        """
-        # TODO: Implement
-        # 1. Get all chunks linked to this company
-        # 2. Get associated interactions/artifacts
-        # 3. Return with context
-        raise NotImplementedError
+        results = []
+        for chunk in chunks:
+            results.append(SearchResult(
+                chunk=chunk,
+                score=1.0,
+                company=company,
+            ))
+        return results
 
     async def search_by_person(
         self,
@@ -61,17 +59,17 @@ class Retriever:
         limit: int = 20,
     ) -> list[SearchResult]:
         """Find all content involving a person."""
-        # TODO: Implement
-        raise NotImplementedError
+        chunks = await self.storage.get_chunks_by_entity(person_id, limit=limit)
+        person = await self.storage.get_person(person_id)
 
-    async def search_by_theme(
-        self,
-        theme_id: UUID,
-        limit: int = 20,
-    ) -> list[SearchResult]:
-        """Find all content related to a theme."""
-        # TODO: Implement
-        raise NotImplementedError
+        results = []
+        for chunk in chunks:
+            results.append(SearchResult(
+                chunk=chunk,
+                score=1.0,
+                people=[person] if person else None,
+            ))
+        return results
 
     async def semantic_search(
         self,
@@ -124,14 +122,10 @@ class Retriever:
         """Add entity context to a search result."""
         chunk = result.chunk
 
-        # Fetch linked entities
         company = None
         people = []
-        themes = []
 
         for entity_id in chunk.entity_ids:
-            # Try each entity type
-            # TODO: Store entity type in chunk to avoid these lookups
             c = await self.storage.get_company(entity_id)
             if c:
                 company = c
@@ -139,15 +133,10 @@ class Retriever:
             p = await self.storage.get_person(entity_id)
             if p:
                 people.append(p)
-                continue
-            t = await self.storage.get_theme(entity_id)
-            if t:
-                themes.append(t)
 
         return SearchResult(
             chunk=chunk,
             score=result.score,
             company=company,
             people=people if people else None,
-            themes=themes if themes else None,
         )

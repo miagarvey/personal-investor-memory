@@ -1,7 +1,7 @@
 from typing import Optional
 from uuid import UUID
 
-from src.models import Entity, Company, Person, Theme
+from src.models import Entity, Company, Person, EntityType
 from src.entities.extractor import ExtractedEntity
 from src.storage.base import StorageBackend
 
@@ -23,14 +23,25 @@ class EntityLinker:
         """
         Link an extracted mention to a canonical entity.
 
+        Routes to the appropriate linker based on entity type.
         Returns existing entity if found, creates new one otherwise.
         """
-        # TODO: Implement linking logic
-        # 1. Check if we have a canonical URL (LinkedIn, company site)
-        # 2. Search for existing entity by URL
-        # 3. If no URL, fuzzy match on name
-        # 4. Create new entity if no match
-        raise NotImplementedError
+        meta = extracted.metadata or {}
+
+        if extracted.entity_type == EntityType.COMPANY:
+            return await self.link_company(
+                name=extracted.text,
+                url=meta.get("url"),
+                linkedin_url=meta.get("linkedin_url"),
+            )
+        elif extracted.entity_type == EntityType.PERSON:
+            return await self.link_person(
+                name=extracted.text,
+                email=meta.get("email"),
+                linkedin_url=meta.get("linkedin_url"),
+            )
+        else:
+            raise ValueError(f"Unknown entity type: {extracted.entity_type}")
 
     async def link_company(
         self,
@@ -67,7 +78,6 @@ class EntityLinker:
         linkedin_url: Optional[str] = None,
     ) -> Person:
         """Link or create a person entity."""
-        # Similar logic to company linking
         if linkedin_url:
             existing = await self.storage.get_person_by_linkedin(linkedin_url)
             if existing:
