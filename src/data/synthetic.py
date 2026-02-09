@@ -7,32 +7,32 @@ from src.ingestion.pipeline import IngestionPipeline
 from src.models import SourceType
 
 
-# === Fictional company pool ===
+# === Real company pool (NEA AI/ML infrastructure portfolio) ===
 COMPANIES = [
-    {"name": "NovaBuild", "domain": "enterprise SaaS", "desc": "AI-powered construction management platform"},
-    {"name": "PayLoop", "domain": "fintech", "desc": "Real-time B2B payment orchestration"},
-    {"name": "CodeVault", "domain": "developer tools", "desc": "Secure code artifact management for enterprises"},
-    {"name": "MediSync", "domain": "healthtech", "desc": "Clinical data interoperability platform"},
-    {"name": "ShieldNet", "domain": "cybersecurity", "desc": "Zero-trust network security for distributed teams"},
-    {"name": "DataForge", "domain": "data infrastructure", "desc": "Real-time ETL pipeline builder"},
-    {"name": "GreenGrid", "domain": "climate tech", "desc": "Carbon accounting for supply chains"},
-    {"name": "TradeNest", "domain": "marketplace", "desc": "Vertical marketplace for specialty goods"},
-    {"name": "PromptLayer", "domain": "AI/ML", "desc": "LLM observability and prompt management"},
-    {"name": "VeloCity", "domain": "developer tools", "desc": "Cloud development environments with instant startup"},
+    {"name": "Anyscale", "domain": "AI/ML infrastructure", "desc": "distributed compute platform behind Ray for scalable ML training, serving, and RL"},
+    {"name": "Databricks", "domain": "data infrastructure", "desc": "lakehouse architecture providing foundational data and ML platform for modern AI stacks"},
+    {"name": "Weaviate", "domain": "AI/ML infrastructure", "desc": "open-source vector database for semantic search, RAG, and AI-native applications"},
+    {"name": "Instabase", "domain": "AI/ML infrastructure", "desc": "unstructured data understanding platform bridging documents to machine-readable systems"},
+    {"name": "Snorkel AI", "domain": "AI/ML infrastructure", "desc": "programmatic data labeling and supervision for building ML systems without hand-labeling"},
+    {"name": "Hugging Face", "domain": "AI/ML infrastructure", "desc": "model hub and tooling layer for open ML with core distribution and collaboration infra"},
+    {"name": "Domino Data Lab", "domain": "MLOps", "desc": "end-to-end MLOps platform for regulated and enterprise ML workloads"},
+    {"name": "Cohere", "domain": "AI/ML infrastructure", "desc": "LLM provider focused on enterprise APIs and deployment flexibility"},
+    {"name": "Scale AI", "domain": "AI/ML infrastructure", "desc": "data engine for training and evaluating frontier AI models"},
+    {"name": "Fivetran", "domain": "data infrastructure", "desc": "automated data movement layer feeding analytics and ML systems"},
 ]
 
-# === Fictional people pool ===
+# === Real founders/CEOs ===
 FOUNDERS = [
-    {"name": "Sarah Chen", "role": "CEO", "company": "NovaBuild"},
-    {"name": "Marcus Rivera", "role": "CEO/CTO", "company": "PayLoop"},
-    {"name": "Priya Patel", "role": "CEO", "company": "CodeVault"},
-    {"name": "James Liu", "role": "CTO", "company": "MediSync"},
-    {"name": "Elena Volkov", "role": "CEO", "company": "ShieldNet"},
-    {"name": "Daniel Okafor", "role": "CEO", "company": "DataForge"},
-    {"name": "Anika Sharma", "role": "CEO", "company": "GreenGrid"},
-    {"name": "Tom Brennan", "role": "CEO", "company": "TradeNest"},
-    {"name": "Yuki Tanaka", "role": "CTO", "company": "PromptLayer"},
-    {"name": "Alex Kim", "role": "CEO", "company": "VeloCity"},
+    {"name": "Robert Nishihara", "role": "CEO", "company": "Anyscale"},
+    {"name": "Ali Ghodsi", "role": "CEO", "company": "Databricks"},
+    {"name": "Bob van Luijt", "role": "CEO", "company": "Weaviate"},
+    {"name": "Anant Bhardwaj", "role": "CEO", "company": "Instabase"},
+    {"name": "Alex Ratner", "role": "CEO", "company": "Snorkel AI"},
+    {"name": "Clément Delangue", "role": "CEO", "company": "Hugging Face"},
+    {"name": "Nick Elprin", "role": "CEO", "company": "Domino Data Lab"},
+    {"name": "Aidan Gomez", "role": "CEO", "company": "Cohere"},
+    {"name": "Alexandr Wang", "role": "CEO", "company": "Scale AI"},
+    {"name": "George Fraser", "role": "CEO", "company": "Fivetran"},
 ]
 
 PARTNERS = [
