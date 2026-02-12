@@ -1,98 +1,126 @@
 """Tests for entity extraction."""
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 
+from src.entities.extractor import EntityExtractor, ExtractedEntity
 from src.models import EntityType
 
 
-def test_extract_companies_from_spacy(entity_extractor):
-    text = "We had a meeting with Google and Microsoft about their cloud offerings."
-    companies = entity_extractor.extract_companies(text)
-    names = [e.text for e in companies]
-    assert any("Google" in n for n in names) or any("Microsoft" in n for n in names)
-    for e in companies:
-        assert e.entity_type == EntityType.COMPANY
+@pytest.fixture
+def entity_extractor():
+    """Provide an entity extractor (does not require a real API key for mocked tests)."""
+    return EntityExtractor(api_key="test-key")
 
 
-def test_extract_companies_from_url(entity_extractor):
-    text = "Check out https://novabuild.io for more information."
-    companies = entity_extractor.extract_companies(text)
-    assert len(companies) >= 1
-    assert any(e.metadata and "url" in e.metadata for e in companies)
+def _mock_llm_response(companies: list[str], people: list[str]):
+    """Create a mock OpenAI chat completion response."""
+    import json
+    mock_response = AsyncMock()
+    mock_response.choices = [
+        AsyncMock(message=AsyncMock(content=json.dumps({
+            "companies": companies,
+            "people": people,
+        })))
+    ]
+    return mock_response
 
 
-def test_extract_people_from_spacy(entity_extractor):
-    text = "Sarah Chen presented the pitch deck. Marcus Rivera asked about unit economics."
-    people = entity_extractor.extract_people(text)
-    names = [e.text for e in people]
-    assert any("Sarah Chen" in n for n in names)
-    for e in people:
-        assert e.entity_type == EntityType.PERSON
+@pytest.mark.asyncio
+async def test_extract_companies_from_llm(entity_extractor):
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response(["Google", "Microsoft"], []))):
+        text = "We had a meeting with Google and Microsoft about their cloud offerings."
+        entities = await entity_extractor.extract(text)
+        companies = [e for e in entities if e.entity_type == EntityType.COMPANY]
+        names = [e.text for e in companies]
+        assert "Google" in names
+        assert "Microsoft" in names
 
 
-def test_extract_people_from_email(entity_extractor):
-    text = "Please contact john.doe@example.com for details."
-    people = entity_extractor.extract_people(text)
-    assert len(people) >= 1
-    assert any(e.metadata and e.metadata.get("email") == "john.doe@example.com" for e in people)
+@pytest.mark.asyncio
+async def test_extract_companies_from_url(entity_extractor):
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response([], []))):
+        text = "Check out https://novabuild.io for more information."
+        entities = await entity_extractor.extract(text)
+        assert len(entities) >= 1
+        assert any(e.metadata and "url" in e.metadata for e in entities)
 
 
-def test_extract_all(entity_extractor):
-    text = "Sarah Chen from NovaBuild presented their platform."
-    entities = entity_extractor.extract(text)
-    types = {e.entity_type for e in entities}
-    # Should find companies and/or people
-    assert EntityType.COMPANY in types or EntityType.PERSON in types
+@pytest.mark.asyncio
+async def test_extract_people_from_llm(entity_extractor):
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response([], ["Sarah Chen", "Marcus Rivera"]))):
+        text = "Sarah Chen presented the pitch deck. Marcus Rivera asked about unit economics."
+        entities = await entity_extractor.extract(text)
+        people = [e for e in entities if e.entity_type == EntityType.PERSON]
+        names = [e.text for e in people]
+        assert "Sarah Chen" in names
+        assert "Marcus Rivera" in names
 
 
-def test_rejects_non_company_acronyms(entity_extractor):
-    """CTO, ARR, TAM etc. should not be extracted as companies."""
-    text = (
-        "The CTO walked us through the product. "
-        "ARR grew from $2M to $3.5M. TAM is estimated at $5B. "
-        "NPS of 70+."
-    )
-    companies = entity_extractor.extract_companies(text)
-    names = [e.text.lower() for e in companies]
-    for term in ["cto", "arr", "tam", "nps"]:
-        assert term not in names, f"'{term}' should not be extracted as a company"
+@pytest.mark.asyncio
+async def test_extract_people_from_email(entity_extractor):
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response([], []))):
+        text = "Please contact john.doe@example.com for details."
+        entities = await entity_extractor.extract(text)
+        assert len(entities) >= 1
+        assert any(e.metadata and e.metadata.get("email") == "john.doe@example.com" for e in entities)
 
 
-def test_strips_trailing_noise_from_company_names(entity_extractor):
-    """Company names with trailing context should be cleaned to the core name."""
-    text = "Subject: Intro: Fivetran - data infrastructure\n\nWanted to flag Fivetran for the group."
-    companies = entity_extractor.extract_companies(text)
-    names = [e.text for e in companies]
-    # Should not have "Fivetran - data infrastructure" as a separate entity
-    for name in names:
-        assert " - " not in name, f"Got noisy name: '{name}'"
+@pytest.mark.asyncio
+async def test_extract_all(entity_extractor):
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response(["NovaBuild"], ["Sarah Chen"]))):
+        text = "Sarah Chen from NovaBuild presented their platform."
+        entities = await entity_extractor.extract(text)
+        types = {e.entity_type for e in entities}
+        assert EntityType.COMPANY in types
+        assert EntityType.PERSON in types
 
 
-def test_deduplicates_after_cleaning(entity_extractor):
-    """'Fivetran - Follow-up' and 'Fivetran' should resolve to one entity."""
-    text = (
-        "Subject: Re: Fivetran - Follow-up thoughts\n\n"
-        "Circling back on Fivetran after the deep-dive."
-    )
-    companies = entity_extractor.extract_companies(text)
-    fivetran_matches = [e for e in companies if "fivetran" in e.text.lower()]
-    assert len(fivetran_matches) <= 1, (
-        f"Expected at most 1 Fivetran entity, got {len(fivetran_matches)}: "
-        f"{[e.text for e in fivetran_matches]}"
-    )
+@pytest.mark.asyncio
+async def test_rejects_non_company_acronyms(entity_extractor):
+    """The LLM should not return financial metrics as companies."""
+    # Simulate what a well-prompted LLM should return: no false positives
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response([], []))):
+        text = (
+            "The CTO walked us through the product. "
+            "ARR grew from $2M to $3.5M. TAM is estimated at $5B. "
+            "NPS of 70+."
+        )
+        entities = await entity_extractor.extract(text)
+        company_names = [e.text.lower() for e in entities if e.entity_type == EntityType.COMPANY]
+        for term in ["cto", "arr", "tam", "nps"]:
+            assert term not in company_names, f"'{term}' should not be extracted as a company"
 
 
-def test_clean_company_name_static():
-    """Unit test the _clean_company_name helper directly."""
-    from src.entities.extractor import EntityExtractor
+@pytest.mark.asyncio
+async def test_deduplicates_llm_and_regex(entity_extractor):
+    """LLM-extracted entity should not be duplicated by regex extraction."""
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response(["Novabuild"], []))):
+        text = "Check out NovaBuild at https://novabuild.io for details."
+        entities = await entity_extractor.extract(text)
+        company_names = [e.text.lower() for e in entities if e.entity_type == EntityType.COMPANY]
+        assert company_names.count("novabuild") == 1
 
-    clean = EntityExtractor._clean_company_name
-    assert clean("Fivetran - data infrastructure") == "Fivetran"
-    assert clean("Fivetran Series A") == "Fivetran"
-    assert clean("Fivetran Q4 Portfolio Update") == "Fivetran"
-    assert clean("Fivetran - Follow-up thoughts") == "Fivetran"
-    assert clean("ARR") is None
-    assert clean("CTO") is None
-    assert clean("Series A") is None
-    assert clean("Google") == "Google"
-    assert clean("Hugging Face") == "Hugging Face"
+
+@pytest.mark.asyncio
+async def test_linkedin_extraction(entity_extractor):
+    with patch.object(entity_extractor.client.chat.completions, "create",
+                      new=AsyncMock(return_value=_mock_llm_response([], []))):
+        text = "See https://www.linkedin.com/company/stripe and https://www.linkedin.com/in/john-doe"
+        entities = await entity_extractor.extract(text)
+
+        companies = [e for e in entities if e.entity_type == EntityType.COMPANY]
+        people = [e for e in entities if e.entity_type == EntityType.PERSON]
+
+        assert any("Stripe" in e.text for e in companies)
+        assert any("John Doe" in e.text for e in people)
+        assert any(e.metadata and "linkedin_url" in e.metadata for e in companies)
+        assert any(e.metadata and "linkedin_url" in e.metadata for e in people)

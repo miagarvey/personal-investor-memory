@@ -18,6 +18,9 @@ Phase 2 endpoints:
 """
 
 from contextlib import asynccontextmanager
+
+from dotenv import load_dotenv
+load_dotenv()
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -361,7 +364,7 @@ def create_app() -> FastAPI:
         # Extract entities
         extractor = EntityExtractor()
 
-        raw_entities = extractor.extract(request.text)
+        raw_entities = await extractor.extract(request.text)
         extracted_entities = []
 
         for e in raw_entities:

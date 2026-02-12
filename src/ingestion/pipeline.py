@@ -53,6 +53,9 @@ class IngestionPipeline:
         participant_ids = []
         if participants:
             for name in participants:
+                # Skip raw email addresses — they aren't useful person names
+                if "@" in name:
+                    continue
                 person = await self.entity_linker.link_person(name=name)
                 participant_ids.append(person.id)
 
@@ -75,7 +78,7 @@ class IngestionPipeline:
 
         for i, chunk_text in enumerate(all_chunk_texts):
             # Extract entities from this chunk
-            extracted = self.entity_extractor.extract(chunk_text)
+            extracted = await self.entity_extractor.extract(chunk_text)
 
             # Link extracted entities to canonical entities
             entity_ids = []
@@ -123,7 +126,7 @@ class IngestionPipeline:
         embeddings = await self.embedding_service.embed_batch(chunk_texts)
 
         for i, chunk_text in enumerate(chunk_texts):
-            extracted = self.entity_extractor.extract(chunk_text)
+            extracted = await self.entity_extractor.extract(chunk_text)
             entity_ids = []
             for ext in extracted:
                 linked = await self.entity_linker.link_entity(ext)

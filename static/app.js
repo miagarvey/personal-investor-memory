@@ -136,7 +136,7 @@ function renderSearchResults(companies, people) {
         html += `
             <div class="search-result-item" data-type="person" data-id="${person.id}">
                 <span class="type-badge person">Person</span>
-                <span>${escapeHtml(person.name)}</span>
+                <span>${escapeHtml(person.name)}</span>1
                 ${person.company_name ? `<span style="color: #999; font-size: 0.8em;">@ ${escapeHtml(person.company_name)}</span>` : ''}
             </div>
         `;

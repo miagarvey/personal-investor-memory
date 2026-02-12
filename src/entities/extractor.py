@@ -1,7 +1,9 @@
+import json
+import os
 import re
 from dataclasses import dataclass
 
-import spacy
+from openai import AsyncOpenAI
 
 from src.models import EntityType
 
@@ -17,7 +19,7 @@ class ExtractedEntity:
     metadata: dict | None = None
 
 
-# Regex patterns
+# Regex patterns for structured data (URLs, emails, LinkedIn)
 URL_PATTERN = re.compile(
     r'https?://(?:www\.)?([a-zA-Z0-9-]+(?:\.[a-zA-Z]{2,})+)(?:/[^\s]*)?'
 )
@@ -31,96 +33,126 @@ LINKEDIN_PERSON_PATTERN = re.compile(
     r'linkedin\.com/in/([a-zA-Z0-9-]+)'
 )
 
-# Terms that spaCy frequently misclassifies as ORG in VC/finance text
-NON_COMPANY_TERMS = {
-    # Roles and titles
-    "cto", "ceo", "cfo", "coo", "cro", "cmo", "vp", "svp", "evp",
-    # Financial metrics and acronyms
-    "arr", "mrr", "tam", "sam", "som", "nps", "yoy", "mom", "qoq",
-    "roi", "irr", "moic", "tvpi", "dpi", "gp", "lp",
-    # Generic business/tech terms
-    "saas", "b2b", "b2c", "ai", "ml", "api",
-    "q1", "q2", "q3", "q4",
-    "series a", "series b", "series c", "series d",
-    "fortune 500",
-}
+EXTRACTION_PROMPT = """\
+Extract all company names and person names mentioned in the following text.
+This text comes from a venture capital / investor context (memos, emails, meeting notes).
 
-# Patterns to strip from the end of spaCy ORG extractions.
-# These catch cases like "Fivetran - Follow-up thoughts" or "Fivetran Series A".
-TRAILING_NOISE_PATTERN = re.compile(
-    r'\s+[-–|]\s+.+$'                                       # "Fivetran - data infrastructure"
-    r'|\s+Series\s+[A-Z]\d?\b.*$'                           # "Fivetran Series A"
-    r'|\s+Q[1-4]\b.*$'                                      # "Fivetran Q4 Portfolio Update"
-    r'|\s+(?:Investment\s+Memo|Follow[\s-]*up|Portfolio\s+Update|Deal\s+Memo)\b.*$',
-    re.IGNORECASE,
-)
+Rules:
+- Companies: Extract actual company/startup names. Do NOT extract financial metrics \
+(ARR, MRR, TAM), funding rounds (Series A), roles (CTO, CEO), or generic tech terms \
+(SaaS, B2B, AI/ML, DevOps).
+- People: Extract actual human names (first and last name). Do NOT extract roles, \
+section headers, acronyms, or company names.
+- Return each entity exactly once, using its canonical/clean name.
+- If unsure whether something is an entity, omit it.
+
+Return valid JSON with this exact structure:
+{"companies": ["Company Name", ...], "people": ["First Last", ...]}
+
+Text:
+"""
 
 
 class EntityExtractor:
     """
     Extracts entities (companies and people) from text.
 
-    Uses spaCy NER for ORG/PERSON + regex for URLs/emails/LinkedIn.
+    Uses OpenAI GPT-4o-mini for NER + regex for URLs/emails/LinkedIn.
     """
 
-    def __init__(self, model_name: str = "en_core_web_sm"):
-        self.nlp = spacy.load(model_name)
+    def __init__(self, api_key: str | None = None, model: str = "gpt-4o-mini"):
+        self.client = AsyncOpenAI(api_key=api_key or os.environ.get("OPENAI_API_KEY"))
+        self.model = model
 
-    def extract(self, text: str) -> list[ExtractedEntity]:
+    async def _extract_with_llm(self, text: str) -> tuple[list[str], list[str]]:
+        """Call the LLM to extract company and person names from text."""
+        response = await self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {"role": "system", "content": "You extract entities from investor/VC text. Respond only with valid JSON."},
+                {"role": "user", "content": EXTRACTION_PROMPT + text},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+
+        raw = response.choices[0].message.content
+        try:
+            parsed = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return [], []
+
+        companies = parsed.get("companies", [])
+        people = parsed.get("people", [])
+
+        # Ensure we got lists of strings
+        if not isinstance(companies, list):
+            companies = []
+        if not isinstance(people, list):
+            people = []
+
+        return (
+            [c for c in companies if isinstance(c, str) and c.strip()],
+            [p for p in people if isinstance(p, str) and p.strip()],
+        )
+
+    async def extract(self, text: str) -> list[ExtractedEntity]:
         """Extract all entities (companies and people) from text."""
-        entities = []
-        entities.extend(self.extract_companies(text))
-        entities.extend(self.extract_people(text))
+        # LLM-based extraction for unstructured text
+        llm_companies, llm_people = await self._extract_with_llm(text)
+
+        entities: list[ExtractedEntity] = []
+        seen_names: set[str] = set()
+
+        # Add LLM-extracted companies
+        for name in llm_companies:
+            name_lower = name.lower()
+            if name_lower not in seen_names:
+                seen_names.add(name_lower)
+                # Find position in text if possible
+                start = text.lower().find(name_lower)
+                end = start + len(name) if start >= 0 else 0
+                start = max(start, 0)
+                entities.append(ExtractedEntity(
+                    text=name,
+                    entity_type=EntityType.COMPANY,
+                    start_pos=start,
+                    end_pos=end,
+                    confidence=0.9,
+                ))
+
+        # Add LLM-extracted people
+        for name in llm_people:
+            name_lower = name.lower()
+            if name_lower not in seen_names:
+                seen_names.add(name_lower)
+                start = text.lower().find(name_lower)
+                end = start + len(name) if start >= 0 else 0
+                start = max(start, 0)
+                entities.append(ExtractedEntity(
+                    text=name,
+                    entity_type=EntityType.PERSON,
+                    start_pos=start,
+                    end_pos=end,
+                    confidence=0.9,
+                ))
+
+        # Regex-based extraction for structured data (URLs, emails, LinkedIn)
+        entities.extend(self._extract_from_urls(text, seen_names))
+        entities.extend(self._extract_from_emails(text, seen_names))
+        entities.extend(self._extract_from_linkedin(text, seen_names))
+
         return entities
 
     @staticmethod
-    def _clean_company_name(raw_name: str) -> str | None:
-        """Clean a spaCy ORG name, returning None if it should be rejected."""
-        name = raw_name.strip()
-
-        # Reject known non-company terms
-        if name.lower() in NON_COMPANY_TERMS:
-            return None
-
-        # Strip trailing noise (e.g. "Fivetran - Follow-up thoughts" → "Fivetran")
-        name = TRAILING_NOISE_PATTERN.sub("", name).strip()
-
-        # Reject if too short or is a non-company term after cleaning
-        if len(name) <= 1 or name.lower() in NON_COMPANY_TERMS:
-            return None
-
-        return name
-
-    def extract_companies(self, text: str) -> list[ExtractedEntity]:
-        """Extract company mentions using spaCy ORG + URL/LinkedIn regex."""
+    def _extract_from_urls(text: str, seen_names: set[str]) -> list[ExtractedEntity]:
+        """Extract company entities from URLs."""
         entities = []
-        seen_names = set()
+        skip_domains = {"linkedin.com", "google.com", "gmail.com", "github.com", "twitter.com", "x.com"}
 
-        # spaCy NER for organizations
-        doc = self.nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "ORG":
-                name = self._clean_company_name(ent.text)
-                if name is None:
-                    continue
-                name_lower = name.lower()
-                if name_lower not in seen_names and len(name) > 1:
-                    seen_names.add(name_lower)
-                    entities.append(ExtractedEntity(
-                        text=name,
-                        entity_type=EntityType.COMPANY,
-                        start_pos=ent.start_char,
-                        end_pos=ent.end_char,
-                        confidence=0.8,
-                    ))
-
-        # URL-based company extraction
         for match in URL_PATTERN.finditer(text):
             url = match.group(0)
             domain = match.group(1)
-
-            # Skip common non-company URLs
-            skip_domains = {"linkedin.com", "google.com", "gmail.com", "github.com", "twitter.com", "x.com"}
             base_domain = ".".join(domain.split(".")[-2:])
             if base_domain in skip_domains:
                 continue
@@ -136,8 +168,34 @@ class EntityExtractor:
                     confidence=0.9,
                     metadata={"url": url},
                 ))
+        return entities
 
-        # LinkedIn company URLs
+    @staticmethod
+    def _extract_from_emails(text: str, seen_names: set[str]) -> list[ExtractedEntity]:
+        """Extract person entities from email addresses."""
+        entities = []
+        for match in EMAIL_PATTERN.finditer(text):
+            email = match.group(0)
+            local_part = email.split("@")[0]
+            name_parts = re.split(r'[._]', local_part)
+            name = " ".join(p.title() for p in name_parts if len(p) > 1)
+            if name and name.lower() not in seen_names:
+                seen_names.add(name.lower())
+                entities.append(ExtractedEntity(
+                    text=name,
+                    entity_type=EntityType.PERSON,
+                    start_pos=match.start(),
+                    end_pos=match.end(),
+                    confidence=0.7,
+                    metadata={"email": email},
+                ))
+        return entities
+
+    @staticmethod
+    def _extract_from_linkedin(text: str, seen_names: set[str]) -> list[ExtractedEntity]:
+        """Extract entities from LinkedIn URLs."""
+        entities = []
+
         for match in LINKEDIN_COMPANY_PATTERN.finditer(text):
             slug = match.group(1)
             name = slug.replace("-", " ").title()
@@ -153,48 +211,6 @@ class EntityExtractor:
                     metadata={"linkedin_url": linkedin_url},
                 ))
 
-        return entities
-
-    def extract_people(self, text: str) -> list[ExtractedEntity]:
-        """Extract person mentions using spaCy PERSON + email/LinkedIn regex."""
-        entities = []
-        seen_names = set()
-
-        # spaCy NER for people
-        doc = self.nlp(text)
-        for ent in doc.ents:
-            if ent.label_ == "PERSON":
-                name = ent.text.strip()
-                name_lower = name.lower()
-                if name_lower not in seen_names and len(name) > 1:
-                    seen_names.add(name_lower)
-                    entities.append(ExtractedEntity(
-                        text=name,
-                        entity_type=EntityType.PERSON,
-                        start_pos=ent.start_char,
-                        end_pos=ent.end_char,
-                        confidence=0.8,
-                    ))
-
-        # Email-based person extraction
-        for match in EMAIL_PATTERN.finditer(text):
-            email = match.group(0)
-            local_part = email.split("@")[0]
-            # Try to extract name from email (e.g., john.doe -> John Doe)
-            name_parts = re.split(r'[._]', local_part)
-            name = " ".join(p.title() for p in name_parts if len(p) > 1)
-            if name and name.lower() not in seen_names:
-                seen_names.add(name.lower())
-                entities.append(ExtractedEntity(
-                    text=name,
-                    entity_type=EntityType.PERSON,
-                    start_pos=match.start(),
-                    end_pos=match.end(),
-                    confidence=0.7,
-                    metadata={"email": email},
-                ))
-
-        # LinkedIn person URLs
         for match in LINKEDIN_PERSON_PATTERN.finditer(text):
             slug = match.group(1)
             name = slug.replace("-", " ").title()
